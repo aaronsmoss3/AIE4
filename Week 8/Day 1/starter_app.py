@@ -24,6 +24,8 @@ Loader = PyMuPDFLoader
 
 set_llm_cache(InMemoryCache())
 
+## What was the secon
+
 # Typical QDrant Client Set-up
 collection_name = f"pdf_to_parse_{uuid.uuid4()}"
 client = QdrantClient(":memory:")
@@ -56,6 +58,22 @@ chat_prompt = ChatPromptTemplate.from_messages([
 ])
 
 chat_model = ChatOpenAI(model="gpt-4o-mini")
+
+def process_file(file: AskFileResponse):
+    import tempfile
+
+    with tempfile.NamedTemporaryFile(mode="w", delete=False) as tempfile:
+        with open(tempfile.name, "wb") as f:
+            f.write(file.content)
+
+    Loader = PyMuPDFLoader
+
+    loader = Loader(tempfile.name)
+    documents = loader.load()
+    docs = text_splitter.split_documents(documents)
+    for i, doc in enumerate(docs):
+        doc.metadata["source"] = f"source_{i}"
+    return docs
 
 ### On Chat Start (Session Start) Section ###
 @cl.on_chat_start
@@ -92,6 +110,29 @@ async def on_chat_start():
 
     cl.user_session.set("midterm_chain", retrieval_augmented_qa_chain)
 
+    files = None
+
+    # Wait for the user to upload a file
+    while files == None:
+        # Async method: This allows the function to pause execution while waiting for the user to upload a file,
+        # without blocking the entire application. It improves responsiveness and scalability.
+        files = await cl.AskFileMessage(
+            content="Please upload a PDF file to begin!",
+            accept=["application/pdf"],
+            max_size_mb=20,
+            timeout=180,
+        ).send()
+
+    file = files[0]
+
+    msg = cl.Message(
+        content=f"Processing `{file.name}`...",
+    )
+    await msg.send()
+
+    # load the file
+    docs = process_file(file)
+    
 ### Rename Chains ###
 @cl.author_rename
 def rename(orig_author: str):
